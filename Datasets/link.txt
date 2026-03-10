@@ -1,1 +1,5 @@
 https://github.com/360VidStr/A-large-dataset-of-360-video-user-behaviour
+https://lqiutong.github.io/HelmetPoser.github.io/
+https://github.com/xmar/360Degree_Head_Movement_Dataset
+https://zenodo.org/records/10650505
+
