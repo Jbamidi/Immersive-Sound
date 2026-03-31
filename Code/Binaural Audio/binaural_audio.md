@@ -35,7 +35,6 @@ Edit the top of `binaural_experience.py`:
 
 | Parameter | Default | What it does |
 |-----------|---------|--------------|
-| `SIGNAL_TYPE` | `"chord"` | Source sound: `"chord"`, `"tone"`, `"pink_noise"`, `"click_train"` |
 | `AZIMUTH_ANGLES` | `[0, 45, 90, ...]` | Which directions to render (degrees) |
 | `ELEVATION` | `0` | Vertical angle (0 = ear level) |
 | `CIPIC_SUBJECT` | `3` | HRTF subject ID — different ears sound different (try 8, 10, 15, 18, 21) |
