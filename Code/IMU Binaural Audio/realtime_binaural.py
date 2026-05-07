@@ -23,9 +23,31 @@ except ImportError:
 TONE_FREQ = 440
 CIPIC_SUBJECT = 3
 SAMPLE_RATE = 44100
-BLOCK_SIZE = 2048
+BLOCK_SIZE = 1024
 SERIAL_BAUD = 115200
-SERIAL_PORT = 'COM7'  # set to "COM3", "/dev/ttyUSB0", etc. or None for auto-detect
+SERIAL_PORT = None  # set to "COM3", "/dev/cu.usbmodem1101", etc. or None for auto-detect
+
+
+def parse_yaw_line(line):
+    """Parse either yaw-only serial output or Adafruit ICM-20948 verbose CSV."""
+    try:
+        return float(line) % 360
+    except ValueError:
+        pass
+
+    parts = [part.strip() for part in line.split(",")]
+    if len(parts) < 13:
+        return None
+
+    try:
+        calibrated = int(parts[1])
+        yaw_relative = float(parts[12])
+    except ValueError:
+        return None
+
+    if calibrated != 1:
+        return 0.0
+    return yaw_relative % 360
 
 
 def download_sofa(subject_id):
@@ -90,7 +112,7 @@ def find_arduino_port():
 
 
 class HeadTracker:
-    """Reads yaw angle from Arduino over serial in a background thread."""
+    """Reads yaw angle from Arduino/ICM-20948 serial output in a background thread."""
     def __init__(self, port, baud):
         self.angle = 0.0
         self.running = True
@@ -102,20 +124,20 @@ class HeadTracker:
 
     def _read_loop(self):
         try:
-            ser = serial.Serial(self.port, self.baud, timeout=0.1)
-            self.connected = True
-            print(f"Connected to {self.port}")
-            time.sleep(2)  # wait for Arduino reset
-            ser.flushInput()
+            with serial.Serial(self.port, self.baud, timeout=0.1) as ser:
+                self.connected = True
+                print(f"Connected to {self.port}")
+                time.sleep(2)  # wait for Arduino reset
+                ser.reset_input_buffer()
 
-            while self.running:
-                line = ser.readline().decode('ascii', errors='ignore').strip()
-                if line:
-                    try:
-                        self.angle = float(line)
-                        print(f"\rDEBUG: {self.angle}", end="")
-                    except ValueError:
-                        print(f"BAD LINE: {line}")
+                while self.running:
+                    line = ser.readline().decode('ascii', errors='ignore').strip()
+                    if not line:
+                        continue
+                    yaw = parse_yaw_line(line)
+                    if yaw is None:
+                        continue
+                    self.angle = yaw
         except serial.SerialException as e:
             print(f"Serial error: {e}")
             self.connected = False
@@ -125,6 +147,7 @@ class HeadTracker:
 
     def stop(self):
         self.running = False
+        self.thread.join(timeout=1.0)
 
 
 class BinauralRenderer:
@@ -191,7 +214,7 @@ class BinauralRenderer:
 
 def main():
     print("=" * 50)
-    print("  Real-Time Binaural Head Tracker")
+    print("  Real-Time Binaural 9DoF Head Tracker")
     print("=" * 50)
     print()
     
@@ -244,7 +267,7 @@ def main():
     stream.start_stream()
     print()
     print("Playing! Put on headphones and rotate the IMU.")
-    print("The tone stays fixed in space — turn left and it moves right, etc.")
+    print("The tone direction follows yaw_relative from the Adafruit ICM-20948 CSV.")
     print("Press Ctrl+C to stop.")
     print()
 
