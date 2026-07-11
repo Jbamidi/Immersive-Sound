@@ -1,77 +1,114 @@
 #include <Wire.h>
+#include "SparkFun_BNO080_Arduino_Library.h"
 
-const uint8_t MPU_ADDR = 0x68;
-const uint8_t REG_PWR_MGMT_1 = 0x6B;
-const uint8_t REG_ACCEL_XOUT_H = 0x3B;
+// BNO080 default I2C address is 0x4B. Tie ADR to GND for 0x4A.
+const uint8_t BNO080_I2C_ADDR = 0x4B;
+
+// Sensor report intervals in milliseconds. 20 ms == 50 Hz.
+const uint16_t ACCEL_INTERVAL_MS    = 20;
+const uint16_t GYRO_INTERVAL_MS     = 20;
+const uint16_t ROTATION_INTERVAL_MS = 20;
+
+const uint32_t PRINT_INTERVAL_MS = 100;
+
+BNO080 imu;
 
 struct Accel {
-  float x_g, y_g, z_g;
-  void setRaw(int16_t x, int16_t y, int16_t z) {
-    x_g = x / 16384.0f;
-    y_g = y / 16384.0f;
-    z_g = z / 16384.0f;
-  }
+  float x_mps2, y_mps2, z_mps2;
 };
 
 struct Gyro {
-  float x_dps, y_dps, z_dps;
-  void setRaw(int16_t x, int16_t y, int16_t z) {
-    x_dps = x / 131.0f;
-    y_dps = y / 131.0f;
-    z_dps = z / 131.0f;
-  }
+  float x_rps, y_rps, z_rps;
 };
 
-static void write8(uint8_t reg, uint8_t val) {
-  Wire.beginTransmission(MPU_ADDR);
-  Wire.write(reg);
-  Wire.write(val);
-  Wire.endTransmission(true);
-}
+struct Orientation {
+  float qi, qj, qk, qr;
+  float accuracy_rad;
+  float roll_deg, pitch_deg, yaw_deg;
+};
 
 Accel accel;
 Gyro gyro;
-float temp_c = 0.0f;
+Orientation orient;
+
+uint32_t lastPrintMs = 0;
+
+static void quatToEuler(float qi, float qj, float qk, float qr,
+                        float &roll, float &pitch, float &yaw) {
+  float sinr_cosp = 2.0f * (qr * qi + qj * qk);
+  float cosr_cosp = 1.0f - 2.0f * (qi * qi + qj * qj);
+  roll = atan2(sinr_cosp, cosr_cosp);
+
+  float sinp = 2.0f * (qr * qj - qk * qi);
+  if (sinp >= 1.0f)       pitch =  PI / 2.0f;
+  else if (sinp <= -1.0f) pitch = -PI / 2.0f;
+  else                    pitch = asin(sinp);
+
+  float siny_cosp = 2.0f * (qr * qk + qi * qj);
+  float cosy_cosp = 1.0f - 2.0f * (qj * qj + qk * qk);
+  yaw = atan2(siny_cosp, cosy_cosp);
+
+  roll  *= 180.0f / PI;
+  pitch *= 180.0f / PI;
+  yaw   *= 180.0f / PI;
+}
 
 void setup() {
   Serial.begin(115200);
   delay(500);
 
   Wire.begin();
-  write8(REG_PWR_MGMT_1, 0x00);
-  delay(100);
+  Wire.setClock(400000);
+
+  if (imu.begin(BNO080_I2C_ADDR, Wire) == false) {
+    Serial.println(F("BNO080 not detected on I2C. Check wiring and address."));
+    while (true) delay(1000);
+  }
+
+  imu.enableAccelerometer(ACCEL_INTERVAL_MS);
+  imu.enableGyro(GYRO_INTERVAL_MS);
+  imu.enableRotationVector(ROTATION_INTERVAL_MS);
+
+  Serial.println(F("BNO080 initialised."));
 }
 
 void loop() {
-  Wire.beginTransmission(MPU_ADDR);
-  Wire.write(REG_ACCEL_XOUT_H);
-  Wire.endTransmission(false);
-  Wire.requestFrom(MPU_ADDR, (uint8_t)14, (uint8_t)true);
+  if (imu.dataAvailable() == false) return;
 
-  int16_t ax = (Wire.read() << 8) | Wire.read();
-  int16_t ay = (Wire.read() << 8) | Wire.read();
-  int16_t az = (Wire.read() << 8) | Wire.read();
-  int16_t t  = (Wire.read() << 8) | Wire.read();
-  int16_t gx = (Wire.read() << 8) | Wire.read();
-  int16_t gy = (Wire.read() << 8) | Wire.read();
-  int16_t gz = (Wire.read() << 8) | Wire.read();
+  accel.x_mps2 = imu.getAccelX();
+  accel.y_mps2 = imu.getAccelY();
+  accel.z_mps2 = imu.getAccelZ();
 
-  accel.setRaw(ax, ay, az);
-  gyro.setRaw(gx, gy, gz);
-  temp_c = ((float)t + 521.0f) / 340.0f + 35.0f;
+  gyro.x_rps = imu.getGyroX();
+  gyro.y_rps = imu.getGyroY();
+  gyro.z_rps = imu.getGyroZ();
 
-  Serial.print("A[g] ");
-  Serial.print(accel.x_g, 3); Serial.print(" ");
-  Serial.print(accel.y_g, 3); Serial.print(" ");
-  Serial.print(accel.z_g, 3);
+  orient.qi = imu.getQuatI();
+  orient.qj = imu.getQuatJ();
+  orient.qk = imu.getQuatK();
+  orient.qr = imu.getQuatReal();
+  orient.accuracy_rad = imu.getQuatRadianAccuracy();
+  quatToEuler(orient.qi, orient.qj, orient.qk, orient.qr,
+              orient.roll_deg, orient.pitch_deg, orient.yaw_deg);
 
-  Serial.print(" | G[dps] ");
-  Serial.print(gyro.x_dps, 2); Serial.print(" ");
-  Serial.print(gyro.y_dps, 2); Serial.print(" ");
-  Serial.print(gyro.z_dps, 2);
+  if (millis() - lastPrintMs < PRINT_INTERVAL_MS) return;
+  lastPrintMs = millis();
 
-  Serial.print(" | T[C] ");
-  Serial.println(temp_c, 2);
+  Serial.print("A[m/s^2] ");
+  Serial.print(accel.x_mps2, 3); Serial.print(" ");
+  Serial.print(accel.y_mps2, 3); Serial.print(" ");
+  Serial.print(accel.z_mps2, 3);
 
-  delay(2000);
+  Serial.print(" | G[rad/s] ");
+  Serial.print(gyro.x_rps, 3); Serial.print(" ");
+  Serial.print(gyro.y_rps, 3); Serial.print(" ");
+  Serial.print(gyro.z_rps, 3);
+
+  Serial.print(" | RPY[deg] ");
+  Serial.print(orient.roll_deg,  2); Serial.print(" ");
+  Serial.print(orient.pitch_deg, 2); Serial.print(" ");
+  Serial.print(orient.yaw_deg,   2);
+
+  Serial.print(" | acc[rad] ");
+  Serial.println(orient.accuracy_rad, 3);
 }
