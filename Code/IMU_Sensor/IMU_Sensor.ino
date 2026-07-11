@@ -1,7 +1,22 @@
+// BNO080 head-tracking IMU on the Arduino UNO Q (SKU ABX00162).
+// The sketch runs on the Uno Q's STM32 microcontroller (3.3 V logic).
+//
+// Wiring (BNO080 breakout -> Uno Q):
+//   3V3 -> +3V3   (power the sensor at 3.3 V, NOT +5V)
+//   GND -> GND
+//   SDA -> SDA    (digital pin D20, the pin labelled SDA next to AREF)
+//   SCL -> SCL    (digital pin D21, the pin labelled SCL next to AREF)
+//   INT -> D2     (optional, unused here; the loop polls instead)
+//   RST -> D3     (optional)
+// The pins labelled SDA/SCL are what the default Wire object targets.
+// If you plug the sensor into the Uno Q QWIIC connector instead, that is a
+// different bus (I2C4 on MCU pins PD13/PD12): uncomment the setSDA/setSCL
+// lines in setup() to route the default Wire there.
+
 #include <Wire.h>
 #include "SparkFun_BNO080_Arduino_Library.h"
 
-// BNO080 default I2C address is 0x4B. Tie ADR to GND for 0x4A.
+// BNO080 default I2C address is 0x4B. Close the ADR jumper for 0x4A.
 const uint8_t BNO080_I2C_ADDR = 0x4B;
 
 // Sensor report intervals in milliseconds. 20 ms == 50 Hz.
@@ -55,8 +70,15 @@ static void quatToEuler(float qi, float qj, float qk, float qr,
 
 void setup() {
   Serial.begin(115200);
-  delay(500);
+  // The Uno Q enumerates as native USB serial; wait briefly (but not forever)
+  // for the monitor so the startup messages are not lost.
+  uint32_t serialWaitStart = millis();
+  while (!Serial && millis() - serialWaitStart < 2000) { }
 
+  // Uncomment to route the default Wire to the QWIIC connector (I2C4) instead
+  // of the SDA/SCL header pins:
+  //   Wire.setSDA(PD13);  // QWIIC I2C4_SDA
+  //   Wire.setSCL(PD12);  // QWIIC I2C4_SCL
   Wire.begin();
   Wire.setClock(400000);
 
